@@ -1,0 +1,8 @@
+{
+  "http": {
+    "port": 8080
+  },
+  "samsara": {
+    "api_token": "samsara_api_JCmZCMzSrJ5iCn6fqeYVb8KwBBmNqh"
+  }
+}

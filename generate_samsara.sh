@@ -1,6 +1,8 @@
 #!/bin/bash
 
-echo Regenerating Samsara API in 10 seconds 
+echo "Run from directory above samsara project"
+echo ""
+echo Regenerating Samsara API crate in 10 seconds 
 echo Press CTRL-C to cancel...
 sleep 10
 
