@@ -11,13 +11,17 @@ license = "NONE"
 publish = false
 
 [dependencies]
+chrono = "^0.4"
 config = { version = "0.11", features = ["toml"] }
-hyper = { version = "~0.14", features = ["full"] }
-hyper-tls = "~0.5"
+log = "^0.4"
+simplelog = "^0.10.0"
+futures = "^0.3"
+hyper = { version = "^0.14", features = ["full"] }
+hyper-tls = "^0.5"
 samsara = { path = "../../samsara" }
 serde = "^1.0.126"
 serde_derive = "^1.0.126"
-futures = "^0.3"
+serde_json = "^1.0"
 
 # TODO: Pick and choose features
 tokio = { version = "1", features = ["full"] }
