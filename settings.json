@@ -4,5 +4,14 @@
   },
   "samsara": {
     "api_token": "samsara_api_JCmZCMzSrJ5iCn6fqeYVb8KwBBmNqh"
+  },
+  "transporter": {
+    "database": {
+      "host": "localhost",
+      "port": null,
+      "user": "postgres",
+      "password": "postgres",
+      "name": "transporter"
+    }
   }
 }
