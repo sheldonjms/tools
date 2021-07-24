@@ -8,7 +8,7 @@
   "transporter": {
     "database": {
       "host": "localhost",
-      "port": null,
+      "port": 5432,
       "user": "postgres",
       "password": "postgres",
       "name": "transporter"

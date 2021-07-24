@@ -5,23 +5,21 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-use hyper;
+use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
 use hyper::Client;
-use hyper_tls;
 use hyper_tls::HttpsConnector;
 use log::{info, trace, warn};
 use samsara::apis::configuration::Configuration;
 use samsara::apis::VehicleStatsApi;
-use serde_json;
-use simplelog::{ColorChoice, CombinedLogger, LevelFilter, TermLogger, WriteLogger, TerminalMode};
-use std::fs::File;
+use serde_json::Value;
+use simplelog::{ColorChoice, CombinedLogger, LevelFilter, TerminalMode, TermLogger, WriteLogger};
+use tokio_postgres::{Config, NoTls};
 
 use crate::settings::{Database, Settings};
-use chrono::{DateTime, Utc};
-use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
-use tokio_postgres::{Error, NoTls, Config};
-use std::time::Duration;
 
 // TODO: Move settings library to where the rest of the tools can see it.
 mod settings;
@@ -36,18 +34,18 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// Convert the database configuration in the settings to a tokio-postgres config.
-impl Into<Config> for Database {
-    fn into(self) -> Config {
+impl From<settings::Database> for Config {
+    fn from(db: Database) -> Self {
         let mut config = Config::new();
-        if let Some(user) = self.user {
+        if let Some(user) = db.user {
             config.user(&user);
         }
-        if let Some(password) = self.password {
+        if let Some(password) = db.password {
             config.password(&password);
         }
-        config.host(&self.host)
-            .port(self.port.unwrap_or(5432))
-            .dbname(&self.name)
+        config.host(&db.host)
+            .port(db.port.unwrap_or(5432))
+            .dbname(&db.name)
             .application_name(PKG_NAME)
             .connect_timeout(DB_CONNECT_TIMEOUT)
             .clone()
@@ -68,7 +66,7 @@ struct VehicleStat {
 /// are written to the Transporter database.
 #[tokio::main]
 pub async fn main() -> std::io::Result<()> {
-    let APP_NAME = format!("{} {}", PKG_NAME, PKG_VERSION);
+    let app_name = format!("{} {}", PKG_NAME, PKG_VERSION);
 
     // Logging
     let log_level = LevelFilter::Info;
@@ -91,7 +89,7 @@ pub async fn main() -> std::io::Result<()> {
         ),
     ])
         .unwrap();
-    log::info!("{} started", APP_NAME);
+    log::info!("{} started", app_name);
 
     let settings = Settings::new().unwrap();
 
@@ -100,7 +98,7 @@ pub async fn main() -> std::io::Result<()> {
 
     let samsara_config = Configuration {
         oauth_access_token: Some(settings.samsara.api_token),
-        user_agent: Some(APP_NAME),
+        user_agent: Some(app_name),
         ..Configuration::new(client)
     };
 
@@ -142,8 +140,8 @@ pub async fn main() -> std::io::Result<()> {
                                     Ok(time) => time,
                                     Err(e) => {
                                         error!(
-                                            "Cannot parse time, using current time: {:?}",
-                                            json_obj["time]"]
+                                            "Cannot parse time, using current time \"{:?}\": {:?}",
+                                            json_obj["time]"], e
                                         );
                                         Utc::now()
                                     }
@@ -194,6 +192,7 @@ pub async fn main() -> std::io::Result<()> {
         .for_each(|stat| db_insert_queue.push_front(stat));
     db_insert_queue.truncate(DB_INSERT_QUEUE_MAX_SIZE);
 
+    // FIXME: Return the error and handle above.
     let postgres_config: Config = settings.transporter.database.into();
     match postgres_config.connect(NoTls).await {
         Ok((client, connection)) => {
@@ -202,18 +201,39 @@ pub async fn main() -> std::io::Result<()> {
                     eprintln!("connection error: {}", e);
                 }
             });
-            let rows = client
-                .query("SELECT $1::TEXT", &[&"hello world"])
-                .await.unwrap(); // FIXME: Unwrap;
-            let value: &str = rows[0].get(0);
-            assert_eq!(value, "hello world");
+
+            match client.prepare("INSERT INTO vehicle_stat (time, samsara_id, code, kind, json) VALUES ($1, $2, $3, $4, $5)").await {
+                Ok(insert_stmt) => {
+                    trace!("Going to insert {:?} vehicle stats", db_insert_queue.len());
+                    let mut retry_queue = VecDeque::new();
+                    while let Some(stat) = db_insert_queue.pop_back() {
+                        match client
+                            .execute(&insert_stmt, &[&stat.time, &stat.samsara_id, &stat.code, &stat.kind, &stat.json])
+                            .await {
+                            Ok(row_count) =>
+                                if row_count != 1 {
+                                    error!("Inserted {} vehicle stat rows, expected 1", row_count)
+                                }
+                            Err(e) => {
+                                retry_queue.push_front(stat);
+                                error!("Cannot insert vehicle stat {:?}: {:?}", e, stat)
+                            }
+                        }
+                    }
+                    if !retry_queue.is_empty() {
+                        trace!("There are {} vehicle stats in the retry queue", retry_queue.len());
+                        db_insert_queue.extend(retry_queue);
+                    }
+                }
+                Err(e) => error!("Cannot prepare statement: {:?}", e)
+            }
         }
         Err(e) => error!("Cannot connect to the database: {:?}", e)
     };
 
     // {
     //     "engineState": {
-    //     "time": "2021-07-13T20:10:23Z",w
+    //     "time": "2021 - 07 - 13T20: 10: 23Z",w
     //     "value": "Off"
     // },
     //     "gps": {
@@ -229,12 +249,12 @@ pub async fn main() -> std::io::Result<()> {
     //         "formattedLocation": "83 Street, AB"
     //     },
     //     "speedMilesPerHour": 0,
-    //     "time": "2021-07-14T02:13:53Z"
+    //     "time": "2021 - 07 - 14T02: 13: 53Z"
     //     },
     //     "id": "212014919004270",
     //     "name": "717",
     //     "obdOdometerMeters": {
-    //     "time": "2021-07-13T20:10:22Z",
+    //     "time": "2021 - 07 - 13T20: 10: 22Z",
     //     "value": 386814875
     // }
     // }
