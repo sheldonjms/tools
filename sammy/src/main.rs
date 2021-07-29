@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, NaiveDateTime};
 use hyper::Client;
 use hyper_tls::HttpsConnector;
 use log::{info, trace, warn};
@@ -55,7 +55,9 @@ impl From<settings::Database> for Config {
 
 #[derive(Debug)]
 struct VehicleStat {
-    time: DateTime<Utc>,
+    /// DateTime<Utc> is not used because Slick 3.3 cannot parse timestamp with
+    /// timezone in a PostgreSQL database.
+    time: NaiveDateTime,
     samsara_id: Option<String>,
     code: String,
     kind: String,
@@ -117,6 +119,7 @@ pub async fn main() -> std::io::Result<()> {
         None,
         None,
     );
+
     let vehicle_stats: Vec<VehicleStat> = match vehicle_stats_future.await {
         Ok(response) => response
             .data
@@ -137,19 +140,19 @@ pub async fn main() -> std::io::Result<()> {
                                 let time = match value_obj["time"].as_str().map(|s| match s
                                     .parse::<DateTime<Utc>>()
                                 {
-                                    Ok(time) => time,
+                                    Ok(time) => time.naive_utc(),
                                     Err(e) => {
                                         error!(
                                             "Cannot parse time, using current time \"{:?}\": {:?}",
                                             json_obj["time]"], e
                                         );
-                                        Utc::now()
+                                        Utc::now().naive_utc()
                                     }
                                 }) {
                                     Some(time) => time,
                                     None => {
                                         warn!("No time provided, using current time");
-                                        Utc::now()
+                                        Utc::now().naive_utc()
                                     }
                                 };
 
