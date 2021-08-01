@@ -205,7 +205,9 @@ pub async fn main() -> std::io::Result<()> {
                 }
             });
 
-            match client.prepare("INSERT INTO vehicle_stat (time, samsara_id, code, kind, json) VALUES ($1, $2, $3, $4, $5)").await {
+            match client.prepare("INSERT INTO vehicle_stat (time, samsara_id, code, kind, json) \
+                VALUES ($1, $2, $3, $4, $5) \
+                ON CONFLICT (time, samsara_id, code, kind, json) DO NOTHING").await {
                 Ok(insert_stmt) => {
                     trace!("Going to insert {:?} vehicle stats", db_insert_queue.len());
                     let mut retry_queue = VecDeque::new();
