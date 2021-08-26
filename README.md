@@ -5,5 +5,5 @@ Transporter application.
 
 ## Sammy
 
-Sammy interacts with the Samsara fleet management API. It run in the background logging fleet
+Sammy interacts with the Samsara fleet management API. It runs in the background logging fleet
 information to the Transporter database.
