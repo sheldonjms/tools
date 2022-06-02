@@ -36,11 +36,11 @@ pub struct Settings {
 
 impl Settings {
     pub fn new() -> Result<Self, ConfigError> {
-        let mut settings = Config::default();
-        settings.merge(config::File::with_name("settings")).unwrap();
-        settings
-            .merge(config::Environment::with_prefix("SETTINGS"))
-            .unwrap();
-        settings.try_into()
+        let config = Config::builder()
+            .add_source(config::File::with_name("settings"))
+            .add_source(config::Environment::with_prefix("SETTINGS"))
+            .build()?;
+        let settings: Settings = config.try_deserialize()?;
+        Ok(settings)
     }
 }

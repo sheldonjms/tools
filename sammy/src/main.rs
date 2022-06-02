@@ -73,7 +73,7 @@ pub async fn main() -> std::io::Result<()> {
     // Logging
     let log_level = LevelFilter::Info;
     let log_config = simplelog::ConfigBuilder::new()
-        .set_time_format("%F %T".to_string())
+        .set_time_format_rfc3339()
         .build();
     let log_path = format!("{}.log", PKG_NAME);
     CombinedLogger::init(vec![
@@ -124,7 +124,7 @@ pub async fn main() -> std::io::Result<()> {
         Ok(response) => response
             .data
             .iter()
-            .map(|resp| {
+            .flat_map(|resp| {
                 let json_value = serde_json::to_value(&resp).expect("serialize result");
                 let json_obj = json_value.as_object().expect("JSON object");
                 let json_str = serde_json::to_string(&json_obj).unwrap();
@@ -135,7 +135,7 @@ pub async fn main() -> std::io::Result<()> {
                         json_obj
                             .iter()
                             .filter(|(_, value)| value.is_object())
-                            .map(|(kind, value)| {
+                            .flat_map(|(kind, value)| {
                                 let value_obj = value.as_object().unwrap();
                                 let time = match value_obj["time"].as_str().map(|s| match s
                                     .parse::<DateTime<Utc>>()
@@ -172,7 +172,6 @@ pub async fn main() -> std::io::Result<()> {
                                     json: serde_json::to_string(&pruned_values).unwrap(),
                                 })
                             })
-                            .flatten()
                             .collect()
                     }
                     _ => {
@@ -181,7 +180,6 @@ pub async fn main() -> std::io::Result<()> {
                     }
                 }
             })
-            .flatten()
             .collect(),
         Err(e) => {
             error!("Cannot retrieve vehicle stats: {:?}", e);
