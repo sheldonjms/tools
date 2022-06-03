@@ -1,4 +1,7 @@
 use config::{Config, ConfigError};
+use std::path::Path;
+
+const ENV_VAR_PREFIX: &str = "SAMMY";
 
 #[derive(Debug, Deserialize)]
 pub struct Database {
@@ -35,10 +38,10 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn new() -> Result<Self, ConfigError> {
+    pub fn new<P: AsRef<Path>>(config_file: P) -> Result<Self, ConfigError> {
         let config = Config::builder()
-            .add_source(config::File::with_name("settings"))
-            .add_source(config::Environment::with_prefix("SETTINGS"))
+            .add_source(config::File::from(config_file.as_ref()))
+            .add_source(config::Environment::with_prefix(ENV_VAR_PREFIX))
             .build()?;
         let settings: Settings = config.try_deserialize()?;
         Ok(settings)

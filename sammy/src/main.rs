@@ -6,18 +6,20 @@ extern crate serde;
 extern crate serde_derive;
 
 use std::collections::{HashMap, VecDeque};
-use std::fs::File;
+use std::ffi::OsStr;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc, NaiveDateTime};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version, ValueHint};
 use hyper::Client;
 use hyper_tls::HttpsConnector;
 use log::{info, trace, warn};
+use serde_json::Value;
+use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, TerminalMode, TermLogger, WriteLogger};
+use tokio_postgres::{Config, NoTls};
+
 use samsara::apis::configuration::Configuration;
 use samsara::apis::VehicleStatsApi;
-use serde_json::Value;
-use simplelog::{ColorChoice, CombinedLogger, LevelFilter, TerminalMode, TermLogger, WriteLogger};
-use tokio_postgres::{Config, NoTls};
 
 use crate::settings::{Database, Settings};
 
@@ -25,13 +27,10 @@ use crate::settings::{Database, Settings};
 mod settings;
 
 // FIXME: Items to insert into the database. Reduces the chance of losing items when the database is down.
-const DB_INSERT_QUEUE_MAX_SIZE: usize = 1000000;
+const DB_INSERT_QUEUE_MAX_SIZE: usize = 1_000_000;
 const DB_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 const VEHICLE_STAT_NAMES: &[&str] = &["gps", "engineStates", "obdOdometerMeters"];
-
-const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// Convert the database configuration in the settings to a tokio-postgres config.
 impl From<settings::Database> for Config {
@@ -46,7 +45,7 @@ impl From<settings::Database> for Config {
         config.host(&db.host)
             .port(db.port.unwrap_or(5432))
             .dbname(&db.name)
-            .application_name(PKG_NAME)
+            .application_name(crate_name!())
             .connect_timeout(DB_CONNECT_TIMEOUT)
             .clone()
         // TODO SSL is useful if not connecting to localhost: .ssl_mode(..)
@@ -68,39 +67,76 @@ struct VehicleStat {
 /// are written to the Transporter database.
 #[tokio::main]
 pub async fn main() -> std::io::Result<()> {
-    let app_name = format!("{} {}", PKG_NAME, PKG_VERSION);
+
+    // Command line arguments
+    let cli_matches = Command::new(crate_name!())
+        .version(crate_version!())
+        .author(crate_authors!())
+        .about(crate_description!())
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .multiple_occurrences(true),
+        )
+                .arg(
+                    Arg::new("CONFIG_FILE")
+                        .help("Name of the configuration file")
+                        .value_hint(ValueHint::AnyPath)
+                        .required(true),
+                )
+        .get_matches();
+
+    let log_level_filter = [
+        LevelFilter::Off,
+        LevelFilter::Error,
+        LevelFilter::Warn,
+        LevelFilter::Info, // One --verbose give
+        LevelFilter::Debug,
+        LevelFilter::Trace,
+    ]
+        .get(cli_matches.occurrences_of("verbose") as usize + 2)
+        .unwrap_or(&LevelFilter::Trace);
 
     // Logging
-    let log_level = LevelFilter::Info;
-    let log_config = simplelog::ConfigBuilder::new()
-        .set_time_format_rfc3339()
+    let log_config = ConfigBuilder::new()
+    // TODO: Filter time/thread by verbosity level instead of hard coding them off.
+        // .set_time_level(LevelFilter::Off)
+        // .set_thread_level(LevelFilter::Off)
+        .set_target_level(*log_level_filter)
+        // .add_filter_allow_str(
+        //     crate_name!()
+        //         .split_once("_")
+        //         .map_or("transporter", |(a, _)| a),
+        // )
         .build();
-    let log_path = format!("{}.log", PKG_NAME);
+
     CombinedLogger::init(vec![
         TermLogger::new(
-            log_level,
+            *log_level_filter,
             log_config.clone(),
             TerminalMode::Mixed,
             ColorChoice::Auto,
         ),
-        // FIXME: Does this overwrite the old log?
         WriteLogger::new(
-            log_level,
-            log_config.clone(),
-            File::create(log_path).unwrap(),
+            *log_level_filter,
+            log_config,
+            std::fs::File::create(format!("{}.log", crate_name!())).unwrap(),
         ),
     ])
         .unwrap();
-    log::info!("{} started", app_name);
+    log::info!("{} started", crate_name!());
 
-    let settings = Settings::new().unwrap();
+    // Settings.
+    let config_path = cli_matches.value_of_os("CONFIG_FILE").unwrap();
+    let settings = Settings::new(config_path).unwrap();
 
     let https_connector = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https_connector);
 
     let samsara_config = Configuration {
         oauth_access_token: Some(settings.samsara.api_token),
-        user_agent: Some(app_name),
+        user_agent: Some(crate_name!().to_owned()),
         ..Configuration::new(client)
     };
 
