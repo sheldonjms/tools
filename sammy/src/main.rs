@@ -6,7 +6,6 @@ extern crate serde;
 extern crate serde_derive;
 
 use std::collections::{HashMap, VecDeque};
-use std::ffi::OsStr;
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -15,7 +14,7 @@ use hyper::Client;
 use hyper_tls::HttpsConnector;
 use log::{info, trace, warn};
 use serde_json::Value;
-use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, TerminalMode, TermLogger, WriteLogger};
+use simplelog::{ColorChoice, ConfigBuilder, LevelFilter, TerminalMode, TermLogger};
 use tokio_postgres::{Config, NoTls};
 
 use samsara::apis::configuration::Configuration;
@@ -79,12 +78,12 @@ pub async fn main() -> std::io::Result<()> {
                 .long("verbose")
                 .multiple_occurrences(true),
         )
-                .arg(
-                    Arg::new("CONFIG_FILE")
-                        .help("Name of the configuration file")
-                        .value_hint(ValueHint::AnyPath)
-                        .required(true),
-                )
+        .arg(
+            Arg::new("CONFIG_FILE")
+                .help("Name of the configuration file")
+                .value_hint(ValueHint::AnyPath)
+                .required(true),
+        )
         .get_matches();
 
     let log_level_filter = [
@@ -100,7 +99,7 @@ pub async fn main() -> std::io::Result<()> {
 
     // Logging
     let log_config = ConfigBuilder::new()
-    // TODO: Filter time/thread by verbosity level instead of hard coding them off.
+        // TODO: Filter time/thread by verbosity level instead of hard coding them off.
         // .set_time_level(LevelFilter::Off)
         // .set_thread_level(LevelFilter::Off)
         .set_target_level(*log_level_filter)
@@ -111,20 +110,12 @@ pub async fn main() -> std::io::Result<()> {
         // )
         .build();
 
-    CombinedLogger::init(vec![
-        TermLogger::new(
-            *log_level_filter,
-            log_config.clone(),
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        ),
-        WriteLogger::new(
-            *log_level_filter,
-            log_config,
-            std::fs::File::create(format!("{}.log", crate_name!())).unwrap(),
-        ),
-    ])
-        .unwrap();
+    TermLogger::init(
+        *log_level_filter,
+        log_config.clone(),
+        TerminalMode::Mixed,
+        ColorChoice::Auto,
+    ).unwrap();
     log::info!("{} started", crate_name!());
 
     // Settings.
@@ -239,6 +230,8 @@ pub async fn main() -> std::io::Result<()> {
                 }
             });
 
+            // Requires an constraint on the table for the columns mentioned in the ON CONFLIT
+            // expression.
             match client.prepare("INSERT INTO vehicle_stat (time, samsara_id, code, kind, json) \
                 VALUES ($1, $2, $3, $4, $5) \
                 ON CONFLICT (time, samsara_id, code, kind, json) DO NOTHING").await {
@@ -246,17 +239,11 @@ pub async fn main() -> std::io::Result<()> {
                     trace!("Going to insert {:?} vehicle stats", db_insert_queue.len());
                     let mut retry_queue = VecDeque::new();
                     while let Some(stat) = db_insert_queue.pop_back() {
-                        match client
+                        if let Err(err) = client
                             .execute(&insert_stmt, &[&stat.time, &stat.samsara_id, &stat.code, &stat.kind, &stat.json])
                             .await {
-                            Ok(row_count) =>
-                                if row_count != 1 {
-                                    error!("Inserted {} vehicle stat rows, expected 1", row_count)
-                                }
-                            Err(e) => {
-                                retry_queue.push_front(stat);
-                                error!("Cannot insert vehicle stat {:?}: {:?}", e, stat)
-                            }
+                            retry_queue.push_front(stat);
+                            error!("Cannot insert vehicle stat {:?}: {:?}", err, stat)
                         }
                     }
                     if !retry_queue.is_empty() {
