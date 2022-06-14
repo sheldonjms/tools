@@ -6,10 +6,12 @@ extern crate serde;
 extern crate serde_derive;
 
 use std::collections::{HashMap, VecDeque};
+use std::ffi::{OsStr, OsString};
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Arg, Command, crate_authors, crate_description, crate_name, crate_version, ValueHint};
+use clap::builder::OsStringValueParser;
 use hyper::Client;
 use hyper_tls::HttpsConnector;
 use log::{info, trace, warn};
@@ -32,7 +34,7 @@ const DB_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 const VEHICLE_STAT_NAMES: &[&str] = &["gps", "engineStates", "obdOdometerMeters"];
 
 /// Convert the database configuration in the settings to a tokio-postgres config.
-impl From<settings::Database> for Config {
+impl From<Database> for Config {
     fn from(db: Database) -> Self {
         let mut config = Config::new();
         if let Some(user) = db.user {
@@ -76,12 +78,13 @@ pub async fn main() -> std::io::Result<()> {
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
-                .multiple_occurrences(true),
+                .action(clap::ArgAction::Count)
         )
         .arg(
             Arg::new("CONFIG_FILE")
                 .help("Name of the configuration file")
                 .value_hint(ValueHint::AnyPath)
+                .value_parser(OsStringValueParser::new())
                 .required(true),
         )
         .get_matches();
@@ -94,7 +97,7 @@ pub async fn main() -> std::io::Result<()> {
         LevelFilter::Debug,
         LevelFilter::Trace,
     ]
-        .get(cli_matches.occurrences_of("verbose") as usize + 2)
+        .get(*cli_matches.get_one::<u8>("verbose").unwrap() as usize + 2)
         .unwrap_or(&LevelFilter::Trace);
 
     // Logging
@@ -116,10 +119,10 @@ pub async fn main() -> std::io::Result<()> {
         TerminalMode::Mixed,
         ColorChoice::Auto,
     ).unwrap();
-    log::info!("{} started", crate_name!());
+    info!("{} started", crate_name!());
 
     // Settings.
-    let config_path = cli_matches.value_of_os("CONFIG_FILE").unwrap();
+    let config_path = cli_matches.get_one::<OsString>("CONFIG_FILE").unwrap();
     let settings = Settings::new(config_path).unwrap();
 
     let https_connector = HttpsConnector::new();
